@@ -1,0 +1,570 @@
+
+%option noyywrap
+
+%{
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX 1000
+#define MAX_PROD 50
+#define MAX_RHS 20
+#define SYM_LEN 32
+#define LINE_LEN 4096
+#define TEXT_LEN (MAX * SYM_LEN + 4)
+
+#define ID 256
+
+/* Grammar production structure */
+
+typedef struct
+{
+    char lhs[SYM_LEN];
+    char rhs[MAX_RHS][SYM_LEN];
+    int rhsCount;
+} Production;
+
+/* Global variables */
+
+Production productions[MAX_PROD];
+
+int productionCount = 0;
+
+char startSymbol[SYM_LEN];
+
+char tokens[MAX][SYM_LEN];
+int tokenCount = 0;
+
+char stack[MAX][SYM_LEN];
+int top = 0;
+
+int shiftCount = 0;
+int reduceCount = 0;
+
+
+/* Remove newline from input */
+
+void removeNewline(char str[])
+{
+    str[strcspn(str, "\r\n")] = '\0';
+}
+
+
+/* Display stack contents */
+
+void getStack(char result[])
+{
+    result[0] = '\0';
+
+    for (int i = 0; i <= top; i++)
+    {
+        strcat(result, stack[i]);
+    }
+}
+
+
+/* Display remaining input */
+
+void getInput(int pos, char result[])
+{
+    result[0] = '\0';
+
+    for (int i = pos; i < tokenCount; i++)
+    {
+        strcat(result, tokens[i]);
+    }
+
+    strcat(result, "$");
+}
+
+
+/* Print one row of parsing table */
+
+void printRow(int step, int pos, const char action[])
+{
+    char stackText[TEXT_LEN];
+    char inputText[TEXT_LEN];
+
+    getStack(stackText);
+    getInput(pos, inputText);
+
+    printf("| %-5d | %-25s | %-25s | %-35s |\n",
+           step,
+           stackText,
+           inputText,
+           action);
+}
+
+
+/* Print table header */
+
+void printHeader()
+{
+    printf("\n");
+
+    printf("+-------+---------------------------+---------------------------+-------------------------------------+\n");
+
+    printf("| STEP  | STACK                     | INPUT                     | ACTION                              |\n");
+
+    printf("+-------+---------------------------+---------------------------+-------------------------------------+\n");
+}
+
+
+/* Print table footer */
+
+void printFooter()
+{
+    printf("+-------+---------------------------+---------------------------+-------------------------------------+\n");
+}
+
+
+/* Read user-defined CFG */
+
+int loadGrammar()
+{
+    char line[LINE_LEN];
+    char *part;
+
+    printf("\n");
+    printf("===============================================================\n");
+    printf("                    ENTER YOUR CFG\n");
+    printf("===============================================================\n");
+
+    printf("\nInstructions:\n");
+    printf("1. Enter one production per line.\n");
+    printf("2. Use spaces between grammar symbols.\n");
+    printf("3. Use -> between LHS and RHS.\n");
+    printf("4. Press ENTER on an empty line to finish.\n");
+
+    printf("\nExample:\n");
+    printf("E -> T\n");
+    printf("T -> T * F\n");
+    printf("T -> F\n");
+    printf("F -> id\n\n");
+
+    while (1)
+    {
+        printf("Production %d: ", productionCount + 1);
+
+        if (fgets(line, sizeof(line), stdin) == NULL)
+        {
+            break;
+        }
+
+        removeNewline(line);
+
+        if (strlen(line) == 0)
+        {
+            break;
+        }
+
+        if (productionCount >= MAX_PROD)
+        {
+            printf("Maximum production limit reached!\n");
+            return 0;
+        }
+
+        /* Read left-hand side */
+
+        part = strtok(line, " \t");
+
+        if (part == NULL)
+        {
+            continue;
+        }
+
+        if (strlen(part) >= SYM_LEN)
+        {
+            printf("Non-terminal name is too long!\n");
+            return 0;
+        }
+
+        strcpy(productions[productionCount].lhs, part);
+
+        /* First production determines start symbol */
+
+        if (productionCount == 0)
+        {
+            strcpy(startSymbol, part);
+        }
+
+        /* Check arrow */
+
+        part = strtok(NULL, " \t");
+
+        if (part == NULL || strcmp(part, "->") != 0)
+        {
+            printf("Invalid format! Use: E -> T\n");
+            return 0;
+        }
+
+        productions[productionCount].rhsCount = 0;
+
+        /* Read right-hand side */
+
+        while ((part = strtok(NULL, " \t")) != NULL)
+        {
+            if (productions[productionCount].rhsCount >= MAX_RHS)
+            {
+                printf("Too many RHS symbols!\n");
+                return 0;
+            }
+
+            if (strlen(part) >= SYM_LEN)
+            {
+                printf("Grammar symbol is too long!\n");
+                return 0;
+            }
+
+            strcpy(
+                productions[productionCount].rhs[
+                    productions[productionCount].rhsCount
+                ],
+                part
+            );
+
+            productions[productionCount].rhsCount++;
+        }
+
+        if (productions[productionCount].rhsCount == 0)
+        {
+            printf("Empty productions are not supported!\n");
+            return 0;
+        }
+
+        productionCount++;
+    }
+
+    if (productionCount == 0)
+    {
+        printf("\nNo grammar productions entered!\n");
+        return 0;
+    }
+
+    /* Display entered grammar */
+
+    printf("\n");
+    printf("===============================================================\n");
+    printf("                    YOUR CFG\n");
+    printf("===============================================================\n");
+
+    for (int i = 0; i < productionCount; i++)
+    {
+        printf("%s -> ", productions[i].lhs);
+
+        for (int j = 0; j < productions[i].rhsCount; j++)
+        {
+            printf("%s", productions[i].rhs[j]);
+
+            if (j < productions[i].rhsCount - 1)
+            {
+                printf(" ");
+            }
+        }
+
+        printf("\n");
+    }
+
+    printf("\nStart Symbol: %s\n", startSymbol);
+
+    return 1;
+}
+
+
+/* Find matching production for reduction */
+
+int findReduction(int pos)
+{
+    for (int p = 0; p < productionCount; p++)
+    {
+        int length = productions[p].rhsCount;
+
+        if (length > top)
+        {
+            continue;
+        }
+
+        /* Reduce to start symbol only at end of input */
+
+        if (strcmp(productions[p].lhs, startSymbol) == 0 &&
+            pos < tokenCount)
+        {
+            continue;
+        }
+
+        int match = 1;
+
+        for (int j = 0; j < length; j++)
+        {
+            if (strcmp(
+                stack[top - length + 1 + j],
+                productions[p].rhs[j]
+            ) != 0)
+            {
+                match = 0;
+                break;
+            }
+        }
+
+        if (match)
+        {
+            return p;
+        }
+    }
+
+    return -1;
+}
+
+
+/* Shift-reduce parsing algorithm */
+
+void parser()
+{
+    int pos = 0;
+    int step = 0;
+    int rule;
+
+    char action[LINE_LEN];
+    char initialInput[TEXT_LEN];
+
+    shiftCount = 0;
+    reduceCount = 0;
+
+    /* Initialize stack */
+
+    top = 0;
+    strcpy(stack[0], "$");
+
+    printHeader();
+
+    /* Initial row: empty stack and complete input */
+
+    getInput(0, initialInput);
+
+    printf("| %-5d | %-25s | %-25s | %-35s |\n",
+           step,
+           "",
+           initialInput,
+           "INITIAL");
+
+    step++;
+
+    /* Parsing loop */
+
+    while (1)
+    {
+        /* Accept condition */
+
+        if (pos == tokenCount &&
+            top == 1 &&
+            strcmp(stack[1], startSymbol) == 0)
+        {
+            printRow(step, pos, "ACCEPT");
+            break;
+        }
+
+        /* Check for reduction */
+
+        rule = findReduction(pos);
+
+        if (rule != -1)
+        {
+            int length = productions[rule].rhsCount;
+
+            /* Pop RHS and push LHS */
+
+            top = top - length + 1;
+
+            strcpy(
+                stack[top],
+                productions[rule].lhs
+            );
+
+            /* Construct REDUCE action */
+
+            snprintf(
+                action,
+                sizeof(action),
+                "REDUCE %s -> ",
+                productions[rule].lhs
+            );
+
+            for (int j = 0; j < length; j++)
+            {
+                strcat(
+                    action,
+                    productions[rule].rhs[j]
+                );
+
+                if (j < length - 1)
+                {
+                    strcat(action, " ");
+                }
+            }
+
+            reduceCount++;
+
+            printRow(step++, pos, action);
+        }
+
+        /* Shift operation */
+
+        else if (pos < tokenCount)
+        {
+            if (top >= MAX - 1)
+            {
+                printf("\nStack overflow!\n");
+                printFooter();
+                return;
+            }
+
+            strcpy(
+                stack[++top],
+                tokens[pos]
+            );
+
+            pos++;
+
+            shiftCount++;
+
+            printRow(step++, pos, "SHIFT");
+        }
+
+        /* Error condition */
+
+        else
+        {
+            printRow(step++, pos, "ERROR");
+
+            printFooter();
+
+            printf("\n");
+            printf("===============================================================\n");
+            printf("                  RESULT: STRING REJECTED!\n");
+            printf("===============================================================\n");
+
+            printf("\nTotal SHIFT operations  : %d\n", shiftCount);
+            printf("Total REDUCE operations : %d\n", reduceCount);
+
+            return;
+        }
+    }
+
+    printFooter();
+
+    printf("\n");
+    printf("===============================================================\n");
+    printf("                  RESULT: STRING ACCEPTED!\n");
+    printf("===============================================================\n");
+
+    printf("\nTotal SHIFT operations  : %d\n", shiftCount);
+    printf("Total REDUCE operations : %d\n", reduceCount);
+}
+
+%}
+
+/* =====================================================
+   FLEX LEXICAL RULES
+===================================================== */
+
+%%
+
+[a-zA-Z_][a-zA-Z0-9_]* {
+    return ID;
+}
+
+[0-9]+ {
+    return ID;
+}
+
+[ \t\r\n]+ {
+    /* Ignore whitespace */
+}
+
+. {
+    return (unsigned char)yytext[0];
+}
+
+%%
+
+/* =====================================================
+   MAIN FUNCTION
+   IMPORTANT: Keep main() after the second %%
+===================================================== */
+
+int main()
+{
+    int token;
+    char inputLine[LINE_LEN];
+
+    printf("\n");
+    printf("===============================================================\n");
+    printf("                 SHIFT REDUCE PARSER\n");
+    printf("                   FLEX + C PROJECT\n");
+    printf("===============================================================\n");
+
+    /* STEP 1: Enter CFG */
+
+    if (!loadGrammar())
+    {
+        return 1;
+    }
+
+    /* STEP 2: Enter input expression */
+
+    printf("\n");
+    printf("===============================================================\n");
+    printf("                    INPUT STRING\n");
+    printf("===============================================================\n");
+
+    printf("\nEnter expression: ");
+
+    if (fgets(inputLine, sizeof(inputLine), stdin) == NULL)
+    {
+        printf("Input error!\n");
+        return 1;
+    }
+
+    /* STEP 3: Lexical analysis */
+
+    tokenCount = 0;
+
+    YY_BUFFER_STATE buffer = yy_scan_string(inputLine);
+
+    while ((token = yylex()) != 0)
+    {
+        if (tokenCount >= MAX)
+        {
+            printf("\nInput too long!\n");
+            yy_delete_buffer(buffer);
+            return 1;
+        }
+
+        if (token == ID)
+        {
+            strcpy(tokens[tokenCount++], "id");
+        }
+        else
+        {
+            char symbol[2];
+
+            symbol[0] = (char)token;
+            symbol[1] = '\0';
+
+            strcpy(tokens[tokenCount++], symbol);
+        }
+    }
+
+    yy_delete_buffer(buffer);
+
+    /* STEP 4: Start parsing */
+
+    printf("\n");
+    printf("===============================================================\n");
+    printf("                    PARSING PROCESS\n");
+    printf("===============================================================\n");
+
+    parser();
+
+    return 0;
+}

@@ -1,0 +1,189 @@
+# Test Programs – Shift-Reduce Parser Using Stack
+
+## Test setup
+
+For the test cases below, enter this grammar whenever the program starts:
+
+```text
+E -> T
+T -> T * F
+T -> F
+F -> id
+```
+
+After entering the four productions, press ENTER on an empty line. Then enter the test expression.
+
+**How this grammar works:** the parser accepts a single identifier/number token (`id`) or a multiplication chain such as `id * id * id`.
+
+The lexer converts every identifier and every integer number into `id`. Spaces in the expression are ignored.
+
+---
+
+## A. Correct programs (expected: ACCEPT)
+
+### Test 1 – Single identifier
+
+**Input expression**
+```text
+a
+```
+
+**Tokens produced by FLEX**
+```text
+id
+```
+
+**Expected result**
+```text
+RESULT: STRING ACCEPTED!
+```
+
+### Test 2 – Multiplication of two identifiers
+
+**Input expression**
+```text
+a*b
+```
+
+**Tokens produced by FLEX**
+```text
+id * id
+```
+
+**Expected result**
+```text
+RESULT: STRING ACCEPTED!
+```
+
+### Test 3 – Multiplication chain of three identifiers
+
+**Input expression**
+```text
+a*b*c
+```
+
+**Tokens produced by FLEX**
+```text
+id * id * id
+```
+
+**Expected result**
+```text
+RESULT: STRING ACCEPTED!
+```
+
+### Test 4 – Multiplication of two numbers
+
+**Input expression**
+```text
+12*25
+```
+
+**Tokens produced by FLEX**
+```text
+id * id
+```
+
+**Expected result**
+```text
+RESULT: STRING ACCEPTED!
+```
+
+### Test 5 – Identifiers with underscores and digits
+
+**Input expression**
+```text
+value_1*total2*3
+```
+
+**Tokens produced by FLEX**
+```text
+id * id * id
+```
+
+**Expected result**
+```text
+RESULT: STRING ACCEPTED!
+```
+
+---
+
+## B. Error-focused programs
+
+### Test 6 – Syntax error: unsupported addition operator
+
+**Input expression**
+```text
+a+b
+```
+
+**Tokens produced by FLEX**
+```text
+id + id
+```
+
+**Expected result**
+```text
+RESULT: STRING REJECTED!
+```
+
+**Reason:** the entered grammar contains the multiplication operator `*`, but it has no production for `+`. The parser cannot reduce the complete input to `E`.
+
+### Test 7 – Invalid character / lexical-error limitation
+
+**Input expression**
+```text
+a@b
+```
+
+**Tokens produced by FLEX**
+```text
+id @ id
+```
+
+**Expected result**
+```text
+RESULT: STRING REJECTED!
+```
+
+**Reason and limitation:** the current FLEX rules do not define a dedicated invalid-character error rule. The final `.` rule returns `@` as a token. The parser then rejects the token sequence because the grammar has no production that uses `@`. Therefore, this demonstrates rejection caused by an unsupported token; it does **not** demonstrate a separately detected lexical error.
+
+### Test 8 – Semantic-error limitation: incompatible operand types
+
+**Test assumption:** imagine that `a` is a string variable and `b` is an integer variable in a language where multiplying a string by an integer is not allowed.
+
+**Input expression**
+```text
+a*b
+```
+
+**Tokens produced by FLEX**
+```text
+id * id
+```
+
+**Actual expected result from this source code**
+```text
+RESULT: STRING ACCEPTED!
+```
+
+**Reason and limitation:** the parser checks only whether the token sequence follows the CFG. It does not have a symbol table, data types, or semantic/type checking. Therefore, it accepts this syntactically valid expression even though the assumed operand types make it semantically invalid. This test documents a missing semantic-analysis feature; it is not a semantic error detected by the current program.
+
+---
+
+## Test summary
+
+| Test | Category | Input | Expected/current result |
+|---|---|---|---|
+| 1 | Correct | `a` | ACCEPT |
+| 2 | Correct | `a*b` | ACCEPT |
+| 3 | Correct | `a*b*c` | ACCEPT |
+| 4 | Correct | `12*25` | ACCEPT |
+| 5 | Correct | `value_1*total2*3` | ACCEPT |
+| 6 | Syntax error | `a+b` | REJECT |
+| 7 | Unsupported character | `a@b` | REJECT (not a dedicated lexical error) |
+| 8 | Semantic limitation | `a*b` with incompatible assumed types | ACCEPT (semantic error not detected) |
+
+## Important note for the project evaluation
+
+The assignment asks for examples of lexical, syntax, and semantic errors. The uploaded program currently has no dedicated lexical-error handler and no semantic-analysis phase. Tests 7 and 8 are therefore documented honestly as limitations of the current implementation. To demonstrate actual lexical-error detection and semantic-error detection, the source code would need to be extended.
